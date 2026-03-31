@@ -1018,8 +1018,8 @@ function renderHeatMap() {
     {key:'p17', metricFn: p => p.atkPct},
     {key:'p19', metricFn: p => p.atkPct},
     {key:'p18', metricFn: p => p.atkPct},
-    {key:'p10', metricFn: p => p.astPerS},
-    {key:'p22', metricFn: p => p.astPerS},
+    {key:'p10', metricFn: p => p.ast.map((a,i) => (a!==null&&p.setTA[i]) ? a/p.setTA[i] : null)},
+    {key:'p22', metricFn: p => p.ast.map((a,i) => (a!==null&&p.setTA[i]) ? a/p.setTA[i] : null)},
     {key:'p1',  metricFn: p => p.passRtg},
     {key:'p4',  metricFn: p => p.passRtg},
     {key:'p8',  metricFn: p => p.passRtg},
@@ -1047,7 +1047,7 @@ function renderHeatMap() {
     const vals = row.metricFn(p);
     const isSetter = (p.role==='S');
     const isDS     = (p.role==='L/DS');
-    const metricLabel = isSetter ? 'Ast/Set' : isDS ? 'Pass Rtg' : 'Atk%';
+    const metricLabel = isSetter ? 'Ast%' : isDS ? 'Pass Rtg' : 'Atk%';
     const [cMin,cMax] = isSetter ? [astMin,astMax] : isDS ? [passMin,passMax] : [atkMin,atkMax];
     html += `<tr><td class="player-name-cell">${p.name} <span style="color:#aaa;font-size:.68rem">${p.jersey}</span></td>`;
     html += `<td style="text-align:center;background:#fff"><span class="role-badge role-${p.role.replace('/','')}">${p.role}</span></td>`;
@@ -1058,7 +1058,7 @@ function renderHeatMap() {
       } else {
         const bg = heatColor(v, cMin, cMax);
         const txtColor = v !== null && (v - cMin)/(cMax-cMin) > 0.7 ? '#1a3a2e' : (v - cMin)/(cMax-cMin) < 0.3 ? '#5c0000' : '#2a2a0e';
-        const display = isSetter ? fmt(v,2) : isDS ? fmt(v,3) : fmt(v,3);
+        const display = isSetter ? (v*100).toFixed(1)+'%' : isDS ? fmt(v,3) : fmt(v,3);
         html += `<td style="background:${bg};color:${txtColor}" onclick="switchTab('${p.tabId}')">${display}</td>`;
       }
     });
