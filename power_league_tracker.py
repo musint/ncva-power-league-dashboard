@@ -505,6 +505,93 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
                 f'<span class="stat alloc-stat">Region Bids: {alloc_str}</span>'
             )
 
+        # ── Bid Projection ────────────────────────────────────────────
+        # Parse bid allocation counts from string like "2 National / 2 American / 2 Freedom"
+        bid_projection_html = ""
+        if alloc_str and teams:
+            bid_type_counts = []
+            for part in alloc_str.split("/"):
+                m = re.match(r"\s*(\d+)\s+(\w+)", part.strip())
+                if m:
+                    bid_type_counts.append((m.group(2), int(m.group(1))))
+
+            # Walk sorted teams, skip those with existing bids, assign region bids
+            projected = []  # (bid_type, rank, team)
+            skipped = []    # (rank, team_name, existing_bid_types)
+            remaining_bids = list(bid_type_counts)  # [(type, count), ...]
+            bid_idx = 0  # which bid type we're filling
+
+            for idx, t in enumerate(sorted_teams, 1):
+                if bid_idx >= len(remaining_bids):
+                    break
+                if t["bids"]:
+                    bid_strs = "/".join(bt for _, bt, _ in t["bids"])
+                    skipped.append((idx, t["team_name"], bid_strs))
+                    continue
+                bid_type, count = remaining_bids[bid_idx]
+                projected.append((bid_type, idx, t))
+                remaining_bids[bid_idx] = (bid_type, count - 1)
+                if remaining_bids[bid_idx][1] <= 0:
+                    bid_idx += 1
+
+            if projected:
+                proj_lines = []
+                for bt, rank, t in projected:
+                    pts = t["total_points"] or "?"
+                    proj_lines.append(
+                        f'<div class="proj-line">'
+                        f'<span class="proj-bid-type">{bt}</span>'
+                        f'<span class="proj-arrow">→</span>'
+                        f'<span class="proj-team">#{rank} {t["team_name"]} ({pts} pts)</span>'
+                        f'</div>'
+                    )
+
+                last_rank = projected[-1][1]
+                skipped_html = ""
+                if skipped:
+                    skip_items = [f'{name} ({bids})' for _, name, bids in skipped if _ <= last_rank + 3]
+                    if skip_items:
+                        skipped_html = (
+                            f'<div class="proj-skipped">'
+                            f'Skipped (already have bids): {", ".join(skip_items)}'
+                            f'</div>'
+                        )
+
+                bid_projection_html = (
+                    f'<div class="bid-projection">'
+                    f'<div class="proj-header">Region Bid Projection <span class="proj-sub">(based on current standings, before Region Championship)</span></div>'
+                    + "".join(proj_lines)
+                    + f'<div class="proj-bidline">Bid line: approximately rank #{last_rank}</div>'
+                    + skipped_html
+                    + f'<div class="proj-caveat">Region Championship points (~600-900) will shift final standings. '
+                    + f'See estimated region points below.</div>'
+                    + f'</div>'
+                )
+
+        # ── Region Points Reference (collapsible) ────────────────────
+        region_ref_html = ""
+        if teams:
+            # Based on 2024-2025 structure: Gold 1st=900, -6 for 2nd, then -3 per place
+            # Each division has 12 teams, next division starts 3 below previous last
+            div_names = ["Gold", "Silver", "Bronze", "Aqua", "Blue", "Copper",
+                         "Dusk", "Evergreen", "Fuchsia", "Green"]
+            ref_rows = []
+            base = 900
+            for d in div_names:
+                first = base
+                last = base - 3 * 12 + 3  # 12th place: base - 33
+                # Actually: 1st=base, 2nd=base-6, Nth(N>=2)=base-3*N, 12th=base-36
+                last = base - 36
+                ref_rows.append(f'<span class="ref-div">{d}:</span> {first} → {last}')
+                base = last - 3  # next division starts 3 below
+            region_ref_html = (
+                f'<details class="region-ref">'
+                f'<summary>Est. Region Championship Points (based on 2024-2025)</summary>'
+                f'<div class="ref-grid">{"<br>".join(ref_rows)}</div>'
+                f'<div class="ref-note">12 teams per division. 1st place in each division gets the higher value.</div>'
+                f'</details>'
+            )
+
         summary_html = (
             f'<div class="summary">'
             f'<span class="stat">{len(teams)} teams</span>'
@@ -514,6 +601,8 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
             + "</div>"
             + norcal_club_html
             + bid_positions
+            + bid_projection_html
+            + region_ref_html
         )
 
         rows_html = []
@@ -691,6 +780,80 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
     border-left: 3px solid #818cf8;
   }}
   tr.norcal-club td {{ color: #c7d2fe; }}
+  .bid-projection {{
+    background: #451a03;
+    border: 1px solid #b45309;
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: #fcd34d;
+  }}
+  .proj-header {{
+    font-weight: 700;
+    color: #fbbf24;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }}
+  .proj-sub {{ font-weight: 400; color: #d97706; font-size: 0.8rem; }}
+  .proj-line {{
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+  }}
+  .proj-bid-type {{
+    display: inline-block;
+    min-width: 5.5rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #78350f;
+    color: #fde68a;
+    text-align: center;
+  }}
+  .proj-arrow {{ color: #92400e; font-weight: 700; }}
+  .proj-team {{ color: #fef3c7; }}
+  .proj-bidline {{
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid #78350f;
+    color: #f59e0b;
+    font-weight: 600;
+  }}
+  .proj-skipped {{
+    margin-top: 0.3rem;
+    color: #d97706;
+    font-size: 0.8rem;
+  }}
+  .proj-caveat {{
+    margin-top: 0.4rem;
+    color: #92400e;
+    font-size: 0.78rem;
+    font-style: italic;
+  }}
+  .region-ref {{
+    margin-top: 0.5rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+  }}
+  .region-ref summary {{
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 600;
+  }}
+  .region-ref summary:hover {{ color: var(--text); }}
+  .ref-grid {{
+    padding: 0.5rem 1rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }}
+  .ref-div {{ color: var(--accent); font-weight: 600; display: inline-block; min-width: 5rem; }}
+  .ref-note {{ padding: 0.3rem 1rem 0.6rem; color: #64748b; font-size: 0.75rem; }}
   .fwq-badge {{
     display: inline-block;
     padding: 0.15rem 0.5rem;
