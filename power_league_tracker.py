@@ -91,6 +91,7 @@ MANUAL_BIDS = {
     "G13ABSOL2NC": [("13", "Liberty", "PNQ")],
     "G13SOLNO1NC": [("13", "American", "Power League")],
     "G13PNADV1NC": [("13", "USA", "Red Rock Rave")],
+    "G13MARIN1NC": [("13", "Liberty", "Red Rock Rave")],
 }
 
 TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
