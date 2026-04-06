@@ -82,6 +82,17 @@ NORCAL_BID_ALLOCS = {
     "17/18": "2 National / 2 American / 2 Freedom",
 }
 
+# Manual bid entries for results not yet in the SharePoint files
+# Format: team_code -> [(age, bid_type, qualifying_event), ...]
+MANUAL_BIDS = {
+    "G13FORCE1NC": [("13", "USA", "PNQ")],
+    "G13VSION1NC": [("13", "USA", "PNQ")],
+    "G13VSION2NC": [("13", "Liberty", "PNQ")],
+    "G13ABSOL2NC": [("13", "Liberty", "PNQ")],
+    "G13SOLNO1NC": [("13", "American", "Power League")],
+    "G13PNADV1NC": [("13", "USA", "Red Rock Rave")],
+}
+
 TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
 
 OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NorCal_Power_League_Dashboard.html")
@@ -947,6 +958,18 @@ def fetch_and_generate():
     print(f"  Total bid-qualified teams (all regions): {len(bid_map)}")
     nc_bid_codes = {k for k in bid_map if k.endswith("NC")}
     print(f"  NorCal (NC) bid-qualified teams: {len(nc_bid_codes)}")
+
+    # ── Step 2b: Merge manual bid entries ────────────────────────────────────
+    for code, entries in MANUAL_BIDS.items():
+        if code not in bid_map:
+            bid_map[code] = entries
+        else:
+            # Add manual entries that aren't already present
+            existing = {(a, b) for a, b, _ in bid_map[code]}
+            for entry in entries:
+                if (entry[0], entry[1]) not in existing:
+                    bid_map[code].append(entry)
+    print(f"  Manual bid entries merged: {len(MANUAL_BIDS)} teams")
 
     # ── Step 3: Cross-reference ───────────────────────────────────────────────
     print("\n[3/3] Cross-referencing team codes...")
