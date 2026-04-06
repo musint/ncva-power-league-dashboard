@@ -547,6 +547,7 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
                     )
 
                 last_rank = projected[-1][1]
+                last_pts = float(projected[-1][2]["total_points"]) if projected[-1][2]["total_points"] else 0
                 skipped_html = ""
                 if skipped:
                     skip_items = [f'{name} ({bids})' for _, name, bids in skipped if _ <= last_rank + 3]
@@ -557,12 +558,74 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
                             f'</div>'
                         )
 
+                # ── Bid Race Table: show bubble teams with point gaps ──
+                # Show teams near the bid line: last 2 bid recipients + next ~6 eligible teams
+                bid_race_rows = []
+                eligible_above = []  # bid recipients near the line
+                eligible_below = []  # teams just missing out
+                for idx, t in enumerate(sorted_teams, 1):
+                    if t["bids"]:
+                        continue
+                    t_pts = float(t["total_points"]) if t["total_points"] else 0
+                    is_projected = any(r == idx for _, r, _ in projected)
+                    if is_projected:
+                        eligible_above.append((idx, t, t_pts))
+                    else:
+                        eligible_below.append((idx, t, t_pts))
+                        if len(eligible_below) >= 6:
+                            break
+
+                # Build the race table: last 2 bid recipients + bubble teams
+                show_above = eligible_above[-2:] if len(eligible_above) >= 2 else eligible_above
+                for idx, t, t_pts in show_above:
+                    gap = t_pts - last_pts
+                    gap_str = f"+{gap:.1f}" if gap > 0 else "BID LINE"
+                    bid_race_rows.append(
+                        f'<tr class="race-in">'
+                        f'<td>#{idx}</td>'
+                        f'<td>{t["team_name"]}</td>'
+                        f'<td class="num">{t["total_points"]}</td>'
+                        f'<td class="race-gap-in">{gap_str}</td>'
+                        f'<td class="race-need">Projected bid</td>'
+                        f'</tr>'
+                    )
+
+                for idx, t, t_pts in eligible_below:
+                    gap = last_pts - t_pts
+                    # Each regional place ~3 pts apart
+                    places_needed = max(1, round(gap / 3))
+                    bid_race_rows.append(
+                        f'<tr class="race-out">'
+                        f'<td>#{idx}</td>'
+                        f'<td>{t["team_name"]}</td>'
+                        f'<td class="num">{t["total_points"]}</td>'
+                        f'<td class="race-gap-out">-{gap:.1f}</td>'
+                        f'<td class="race-need">Need ~{places_needed} places higher at Regionals</td>'
+                        f'</tr>'
+                    )
+
+                race_html = ""
+                if bid_race_rows:
+                    race_html = (
+                        f'<div class="bid-race">'
+                        f'<div class="race-header">Bid Race — Point Gaps to Bid Line ({last_pts} pts)</div>'
+                        f'<table class="race-table">'
+                        f'<thead><tr><th>Rank</th><th>Team</th><th>Points</th><th>Gap</th><th>What it Takes</th></tr></thead>'
+                        f'<tbody>{"".join(bid_race_rows)}</tbody>'
+                        f'</table>'
+                        f'<div class="race-note">Each place at Regionals ≈ 3 pts difference. '
+                        f'Gold 1st = ~900 pts, Silver 1st = ~861 pts. '
+                        f'To close a 15-pt gap, finish ~5 places higher than the bid-line team at Regionals.</div>'
+                        f'</div>'
+                    )
+
                 bid_projection_html = (
                     f'<div class="bid-projection">'
                     f'<div class="proj-header">Region Bid Projection <span class="proj-sub">(based on current standings, before Region Championship)</span></div>'
                     + "".join(proj_lines)
-                    + f'<div class="proj-bidline">Bid line: approximately rank #{last_rank}</div>'
+                    + f'<div class="proj-bidline">Bid line: approximately rank #{last_rank} ({last_pts} pts)</div>'
                     + skipped_html
+                    + race_html
                     + f'<div class="proj-caveat">Region Championship points (~600-900) will shift final standings. '
                     + f'See estimated region points below.</div>'
                     + f'</div>'
@@ -832,6 +895,46 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
     color: #92400e;
     font-size: 0.78rem;
     font-style: italic;
+  }}
+  .bid-race {{
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid #78350f;
+  }}
+  .race-header {{
+    font-weight: 700;
+    color: #f59e0b;
+    margin-bottom: 0.4rem;
+    font-size: 0.9rem;
+  }}
+  .race-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }}
+  .race-table th {{
+    text-align: left;
+    padding: 0.3rem 0.5rem;
+    color: #d97706;
+    border-bottom: 1px solid #78350f;
+    font-weight: 600;
+  }}
+  .race-table td {{
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid rgba(120,53,15,0.3);
+  }}
+  tr.race-in td {{ color: #86efac; }}
+  tr.race-out td {{ color: #fcd34d; }}
+  .race-gap-in {{ font-weight: 700; color: #4ade80 !important; }}
+  .race-gap-out {{ font-weight: 700; color: #fb923c !important; }}
+  .race-need {{ font-style: italic; font-size: 0.78rem; }}
+  tr.race-in .race-need {{ color: #86efac; }}
+  tr.race-out .race-need {{ color: #fbbf24; }}
+  .race-note {{
+    margin-top: 0.4rem;
+    color: #92400e;
+    font-size: 0.75rem;
+    line-height: 1.5;
   }}
   .region-ref {{
     margin-top: 0.5rem;
