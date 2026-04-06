@@ -220,11 +220,14 @@
   <div class="header-row">
     <div>
       <h1>NCVA Girls Power League Rankings &amp; Bid Tracker 2025-2026</h1>
-      <p>Data fetched on <span id="fetch-date">April 06, 2026 at 05:53 PM</span> &nbsp;•&nbsp; Sources: NCVA Google Sheets, USAV SharePoint bid lists</p>
+      <p>Data fetched on <span id="fetch-date">April 06, 2026 at 10:55 AM</span> &nbsp;•&nbsp; Sources: NCVA Google Sheets, USAV SharePoint bid lists</p>
     </div>
-    <button id="refresh-btn" class="refresh-btn" onclick="refreshData()">
-      <span class="refresh-icon">&#x21bb;</span> Refresh Data
-    </button>
+    <div style="text-align:right">
+      <button id="refresh-btn" class="refresh-btn" onclick="refreshData()">
+        <span class="refresh-icon">&#x21bb;</span> Refresh Data
+      </button>
+      <div id="refresh-status" class="refresh-status"></div>
+    </div>
   </div>
 </header>
 
@@ -387,29 +390,89 @@ function sortTable(tableId, colIdx) {
   });
 }
 
-function refreshData() {
+const GH_REPO = 'musint/ncva-power-league-dashboard';
+const GH_WORKFLOW = 'update-dashboard.yml';
+
+function getToken() {
+  let token = localStorage.getItem('gh_pat');
+  if (!token) {
+    token = prompt(
+      'First-time setup: Enter a GitHub Personal Access Token\n' +
+      'with "Actions: Read & Write" permission for this repo.\n\n' +
+      'Create one at: https://github.com/settings/tokens?type=beta\n' +
+      'Scope: musint/ncva-power-league-dashboard → Actions: Read and write\n\n' +
+      'This is saved in your browser only (localStorage).'
+    );
+    if (token) localStorage.setItem('gh_pat', token.trim());
+  }
+  return token;
+}
+
+async function refreshData() {
+  const token = getToken();
+  if (!token) return;
+
   const btn = document.getElementById('refresh-btn');
+  const statusEl = document.getElementById('refresh-status');
   btn.disabled = true;
   btn.classList.add('spinning');
-  btn.querySelector('.refresh-icon').textContent = '\u21bb';
-  const oldText = btn.childNodes[btn.childNodes.length - 1];
-  oldText.textContent = ' Refreshing...';
+  btn.childNodes[btn.childNodes.length - 1].textContent = ' Triggering update...';
+  statusEl.textContent = '';
+  statusEl.className = 'refresh-status';
 
-  fetch('http://localhost:8765/refresh')
-    .then(r => {
-      if (!r.ok) throw new Error('Server returned ' + r.status);
-      return r.text();
-    })
-    .then(() => {
-      // Reload the page to show fresh data
-      window.location.reload();
-    })
-    .catch(err => {
-      btn.disabled = false;
-      btn.classList.remove('spinning');
-      oldText.textContent = ' Refresh Data';
-      alert('Refresh failed: ' + err.message + '\n\nMake sure the server is running:\n  python power_league_tracker.py --serve');
-    });
+  try {
+    // Trigger the workflow
+    const dispatchRes = await fetch(
+      `https://api.github.com/repos/${GH_REPO}/actions/workflows/${GH_WORKFLOW}/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github+json',
+        },
+        body: JSON.stringify({ ref: 'main' }),
+      }
+    );
+    if (dispatchRes.status === 401 || dispatchRes.status === 403) {
+      localStorage.removeItem('gh_pat');
+      throw new Error('Invalid token. Click Refresh to try again.');
+    }
+    if (!dispatchRes.ok) throw new Error('Trigger failed: ' + dispatchRes.status);
+
+    statusEl.textContent = 'Workflow triggered. Waiting for completion...';
+
+    // Poll for workflow completion
+    await new Promise(r => setTimeout(r, 5000));
+    for (let i = 0; i < 20; i++) {
+      const runsRes = await fetch(
+        `https://api.github.com/repos/${GH_REPO}/actions/workflows/${GH_WORKFLOW}/runs?per_page=1`,
+        { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' } }
+      );
+      const runs = await runsRes.json();
+      const latest = runs.workflow_runs && runs.workflow_runs[0];
+      if (latest && latest.status === 'completed') {
+        if (latest.conclusion === 'success') {
+          statusEl.textContent = 'Update complete! Reloading...';
+          statusEl.className = 'refresh-status success';
+          // Wait for GitHub Pages to deploy (~15s)
+          await new Promise(r => setTimeout(r, 15000));
+          window.location.reload();
+          return;
+        } else {
+          throw new Error('Workflow failed: ' + latest.conclusion);
+        }
+      }
+      statusEl.textContent = `Waiting for workflow... (${(i+1)*5}s)`;
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    throw new Error('Workflow timed out after 100s');
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = 'refresh-status error';
+    btn.disabled = false;
+    btn.classList.remove('spinning');
+    btn.childNodes[btn.childNodes.length - 1].textContent = ' Refresh Data';
+  }
 }
 </script>
 </body>
