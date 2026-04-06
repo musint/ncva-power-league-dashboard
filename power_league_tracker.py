@@ -95,6 +95,7 @@ MANUAL_BIDS = {
 
 TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
 
+RENO_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reno_team_registrations.csv")
 OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NorCal_Power_League_Dashboard.html")
 
 
@@ -376,6 +377,26 @@ def cross_reference(all_teams: list[dict], bid_map: dict[str, list[tuple]]) -> l
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# RENO REGISTRATION DATA
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_reno_registrations() -> dict[str, str]:
+    """Load Reno Far Western Qualifier registrations. Returns {team_code: division}."""
+    if not os.path.exists(RENO_CSV):
+        print("  Reno registrations file not found, skipping.")
+        return {}
+    reno = {}
+    with open(RENO_CSV, encoding="latin-1") as f:
+        for row in csv.reader(f):
+            if len(row) >= 5:
+                code = row[2].strip()
+                if TEAM_CODE_RE.match(code):
+                    reno[code] = row[4].strip()
+    print(f"  Loaded {len(reno)} Reno registrations")
+    return reno
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # HTML GENERATION
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -403,7 +424,9 @@ def bid_badge_html(bids: list[tuple]) -> str:
     return " ".join(parts)
 
 
-def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool) -> str:
+def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, reno_map: dict = None) -> str:
+    if reno_map is None:
+        reno_map = {}
     groups = list(AGE_GROUPS.keys())
     tabs_html = []
     panels_html = []
@@ -487,6 +510,8 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool) -
                 row_classes.append("norcal-club")
             bid_types = ", ".join(bt for _, bt, _ in t["bids"])
             bid_events = "; ".join(ev for _, _, ev in t["bids"] if ev)
+            fwq_div = reno_map.get(t["team_code"], "")
+            fwq_html = f'<span class="fwq-badge">{fwq_div}</span>' if fwq_div else ""
             rows_html.append(
                 f'<tr class="{" ".join(row_classes)}">'
                 f'<td data-val="{rank_idx}">{rank_idx}</td>'
@@ -496,6 +521,7 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool) -
                 f'<td data-val="{t["total_points"] or 0}" class="num">{t["total_points"]}</td>'
                 f'<td data-val="{bid_types}">{bid_badge_html(t["bids"])}</td>'
                 f'<td data-val="{bid_events}">{bid_events}</td>'
+                f'<td data-val="{fwq_div}">{fwq_html}</td>'
                 "</tr>"
             )
 
@@ -510,10 +536,11 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool) -
               <th onclick="sortTable('tbl-{tab_id}',4)" title="Sort">Points <span class="sort-icon">⇅</span></th>
               <th onclick="sortTable('tbl-{tab_id}',5)" title="Sort">Bid Type <span class="sort-icon">⇅</span></th>
               <th onclick="sortTable('tbl-{tab_id}',6)" title="Sort">Qualifying Event <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',7)" title="Sort">FWQ Reno <span class="sort-icon">⇅</span></th>
             </tr>
           </thead>
           <tbody>
-            {"".join(rows_html) if rows_html else '<tr><td colspan="7" style="text-align:center;padding:2rem;color:#9ca3af;">No data available for this age group</td></tr>'}
+            {"".join(rows_html) if rows_html else '<tr><td colspan="8" style="text-align:center;padding:2rem;color:#9ca3af;">No data available for this age group</td></tr>'}
           </tbody>
         </table>"""
 
@@ -649,6 +676,16 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool) -
     border-left: 3px solid #818cf8;
   }}
   tr.norcal-club td {{ color: #c7d2fe; }}
+  .fwq-badge {{
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #1e3a5f;
+    color: #7dd3fc;
+    border: 1px solid #38bdf8;
+  }}
   .warn-banner {{
     background: #451a03;
     border: 1px solid #92400e;
@@ -980,9 +1017,13 @@ def fetch_and_generate():
         bid_str = ", ".join(f"{a} {b}" for a, b, _ in t["bids"])
         print(f"    {t['team_code']:20s} {t['team_name']:35s} [{bid_str}]")
 
+    # ── Step 4: Load Reno registrations ─────────────────────────────────────
+    print("\n[4/4] Loading Far Western Qualifier registrations...")
+    reno_map = load_reno_registrations()
+
     # ── Generate HTML ─────────────────────────────────────────────────────────
     fetch_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
-    html = generate_html(all_teams, fetch_date, sharepoint_ok)
+    html = generate_html(all_teams, fetch_date, sharepoint_ok, reno_map)
 
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
