@@ -37,13 +37,14 @@ except ImportError:
 SHEET_ID = "1_Xog0a8Lqf6COYTfp0B8575teSsfQoy5"
 
 AGE_GROUPS = {
-    "11":    "239795665",
-    "12":    "539092209",
-    "13":    "476909113",
-    "14":    "2086291804",
-    "15":    "486749021",
-    "16":    "2061013532",
-    "17/18": "1333744874",
+    "11":  "239795665",
+    "12":  "539092209",
+    "13":  "476909113",
+    "14":  "2086291804",
+    "15":  "486749021",
+    "16":  "2061013532",
+    "17":  "1333744874",
+    "18":  "1333744874",
 }
 
 SHAREPOINT_FILES = [
@@ -78,8 +79,9 @@ NORCAL_BID_ALLOCS = {
     "13":    "2 National / 2 American",
     "14":    "2 National / 2 American / 2 Freedom",
     "15":    "2 National / 2 American / 2 Freedom",
-    "16":    "2 National / 2 American / 2 Freedom",
-    "17/18": "2 National / 2 American / 2 Freedom",
+    "16":  "2 National / 2 American / 2 Freedom",
+    "17":  "2 National / 2 American / 2 Freedom",
+    "18":  "2 National / 2 American / 2 Freedom",
 }
 
 # Manual bid entries for results not yet in the SharePoint files
@@ -113,15 +115,22 @@ def fetch_age_group(age_label: str, gid: str, session: requests.Session) -> list
     """
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
     print(f"  Fetching {age_label} age group ...", end=" ", flush=True)
-    try:
-        resp = session.get(url, allow_redirects=True, timeout=30)
-        resp.raise_for_status()
-    except Exception as e:
-        print(f"FAILED ({e})")
-        return []
 
-    text = resp.content.decode("utf-8", errors="replace")
-    rows = list(csv.reader(io.StringIO(text)))
+    # Cache CSV to avoid re-downloading when multiple age groups share a sheet
+    if not hasattr(fetch_age_group, "_cache"):
+        fetch_age_group._cache = {}
+    if gid in fetch_age_group._cache:
+        rows = fetch_age_group._cache[gid]
+    else:
+        try:
+            resp = session.get(url, allow_redirects=True, timeout=30)
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"FAILED ({e})")
+            return [], ""
+        text = resp.content.decode("utf-8", errors="replace")
+        rows = list(csv.reader(io.StringIO(text)))
+        fetch_age_group._cache[gid] = rows
 
     # Extract bid allocation from header rows (e.g., "2 National / 2 American / 2 Freedom")
     bid_alloc = ""
@@ -157,10 +166,15 @@ def fetch_age_group(age_label: str, gid: str, session: requests.Session) -> list
 
     # Total points: scan from code_col+1 to end for the last decimal number
     # before any text field (it appears around index 20)
+    # Filter by age prefix when multiple age groups share the same sheet (17/18)
+    age_prefix = f"G{age_label}" if age_label.isdigit() else None
+
     teams = []
     for row in rows:
         code = safe_get(row, code_col).strip()
         if not TEAM_CODE_RE.match(code):
+            continue
+        if age_prefix and not code.startswith(age_prefix):
             continue
 
         team_name    = safe_get(row, col_team_name).strip()
