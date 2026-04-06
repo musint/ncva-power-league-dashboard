@@ -70,6 +70,18 @@ SHAREPOINT_FILES = [
     },
 ]
 
+# Official USAV 2025-2026 GJNC Regional Bid Allocations for Northern California
+# Source: https://usavolleyball.org/wp-content/uploads/2025/10/2026-Regional-Bid-Allocations.pdf
+NORCAL_BID_ALLOCS = {
+    "11":    "1 National / 1 American",
+    "12":    "1 National / 2 American",
+    "13":    "2 National / 2 American",
+    "14":    "2 National / 2 American / 2 Freedom",
+    "15":    "2 National / 2 American / 2 Freedom",
+    "16":    "2 National / 2 American / 2 Freedom",
+    "17/18": "2 National / 2 American / 2 Freedom",
+}
+
 TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
 
 OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NorCal_Power_League_Dashboard.html")
@@ -380,9 +392,7 @@ def bid_badge_html(bids: list[tuple]) -> str:
     return " ".join(parts)
 
 
-def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, bid_allocs: dict = None) -> str:
-    if bid_allocs is None:
-        bid_allocs = {}
+def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool) -> str:
     groups = list(AGE_GROUPS.keys())
     tabs_html = []
     panels_html = []
@@ -439,10 +449,11 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, b
 
         # Region bid allocation
         bid_alloc_html = ""
-        if age in bid_allocs:
+        alloc_str = NORCAL_BID_ALLOCS.get(age, "")
+        if alloc_str:
             bid_alloc_html = (
                 f'<span class="sep">•</span>'
-                f'<span class="stat alloc-stat">Region Bids: {bid_allocs[age]}</span>'
+                f'<span class="stat alloc-stat">Region Bids: {alloc_str}</span>'
             )
 
         summary_html = (
@@ -910,12 +921,9 @@ def fetch_and_generate():
     # ── Step 1: Fetch Power League data ──────────────────────────────────────
     print("\n[1/3] Fetching NCVA Power League data from Google Sheets...")
     all_teams = []
-    bid_allocs = {}  # age_label -> bid allocation string
     for age, gid in AGE_GROUPS.items():
-        teams, bid_alloc = fetch_age_group(age, gid, session)
+        teams, _bid_alloc = fetch_age_group(age, gid, session)
         all_teams.extend(teams)
-        if bid_alloc:
-            bid_allocs[age] = bid_alloc
     print(f"  Total teams fetched: {len(all_teams)}")
 
     # ── Step 2: Fetch SharePoint bid data ────────────────────────────────────
@@ -951,7 +959,7 @@ def fetch_and_generate():
 
     # ── Generate HTML ─────────────────────────────────────────────────────────
     fetch_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
-    html = generate_html(all_teams, fetch_date, sharepoint_ok, bid_allocs)
+    html = generate_html(all_teams, fetch_date, sharepoint_ok)
 
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
