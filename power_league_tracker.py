@@ -86,15 +86,7 @@ NORCAL_BID_ALLOCS = {
 
 # Manual bid entries for results not yet in the SharePoint files
 # Format: team_code -> [(age, bid_type, qualifying_event), ...]
-MANUAL_BIDS = {
-    "G13FORCE1NC": [("13", "USA", "PNQ")],
-    "G13VSION1NC": [("13", "USA", "PNQ")],
-    "G13VSION2NC": [("13", "Liberty", "PNQ")],
-    "G13ABSOL2NC": [("13", "Liberty", "PNQ")],
-    "G13SOLNO1NC": [("13", "American", "Power League")],
-    "G13PNADV1NC": [("13", "USA", "Red Rock Rave")],
-    "G13MARIN1NC": [("13", "Liberty", "Red Rock Rave")],
-}
+MANUAL_BIDS = {}
 
 TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
 
