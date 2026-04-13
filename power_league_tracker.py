@@ -88,7 +88,7 @@ NORCAL_BID_ALLOCS = {
 # Format: team_code -> [(age, bid_type, qualifying_event), ...]
 MANUAL_BIDS = {}
 
-TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
+TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z0-9]{3,8}[A-Z]{2}$")
 
 RENO_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reno_team_registrations.csv")
 OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NorCal_Power_League_Dashboard.html")
