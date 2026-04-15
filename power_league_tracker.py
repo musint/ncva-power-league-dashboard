@@ -101,9 +101,12 @@ OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NorCal_P
 def fetch_age_group(age_label: str, gid: str, session: requests.Session) -> list[dict]:
     """Download CSV for one age group and return list of team dicts.
 
-    CSV column layout (consistent across all age groups):
+    CSV column layout (most age groups):
       0: Division  1: Div Place  2: Overall Rank  3: (empty)  4: (div-rank?)
-      5: Team Name  6: Team Code  7+: per-tournament data  20: Total Points  21: Bid note
+      5: Team Name  6: Team Code  7: PLQ Place  8-10: L1  11-13: L2  14-16: L3
+      17-19: Region  20: Season Total  21: Bid note
+    The 13s sheet is an outlier: col 7 holds the cumulative total (not PLQ
+    place) and col 20 ("Total") is empty.  The parser handles both layouts.
     """
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
     print(f"  Fetching {age_label} age group ...", end=" ", flush=True)
@@ -156,8 +159,18 @@ def fetch_age_group(age_label: str, gid: str, session: requests.Session) -> list
     col_div_place = code_col - 5   # 1
     col_division  = code_col - 6   # 0
 
-    # Total points: scan from code_col+1 to end for the last decimal number
-    # before any text field (it appears around index 20)
+    # Find the "Total" column from the header row.  Most sheets put the season
+    # total in this column (around index 20).  The 13s sheet is an outlier: its
+    # "Total" column is empty and the cumulative total lives in code_col+1.
+    col_total = None
+    for row in rows[:6]:
+        for i, cell in enumerate(row):
+            if cell.strip().lower() == "total":
+                col_total = i
+                break
+        if col_total is not None:
+            break
+
     # Filter by age prefix when multiple age groups share the same sheet (17/18)
     age_prefix = f"G{age_label}" if age_label.isdigit() else None
 
@@ -179,14 +192,21 @@ def fetch_age_group(age_label: str, gid: str, session: requests.Session) -> list
         if not re.match(r"^\d+$", overall_rank):
             overall_rank = ""
 
-        # Total points: last decimal number in the row after the code column
+        # Total points: prefer the header-identified "Total" column, fall back
+        # to code_col+1 (where the 13s sheet stores cumulative points).
         total_pts = ""
+        if col_total is not None:
+            total_pts = safe_get(row, col_total).strip()
+        if not re.match(r"^\d+(\.\d+)?$", total_pts):
+            # Fallback: code_col+1 may hold the cumulative total (13s layout)
+            fallback = safe_get(row, code_col + 1).strip()
+            if re.match(r"^\d+(\.\d+)?$", fallback):
+                total_pts = fallback
+
         bid_note = ""
         for j in range(code_col + 1, len(row)):
             val = row[j].strip()
-            if re.match(r"^\d+\.\d{2}$", val):
-                total_pts = val  # keep updating; the last one is the total
-            elif val and re.search(r"PNQ|bid|open|national|USA|liberty|american|freedom", val, re.I):
+            if val and re.search(r"PNQ|bid|open|national|USA|liberty|american|freedom", val, re.I):
                 bid_note = val
 
         # Strip trailing ".00" for cleaner display, keep decimals otherwise
