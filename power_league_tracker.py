@@ -340,16 +340,21 @@ def build_direct_download_url(sharing_url: str, unique_id: str, session: request
     return None
 
 
-def parse_bid_xlsx(xlsx_bytes: bytes, sheet_names: list[str]) -> dict[str, list[tuple]]:
+def parse_bid_xlsx(xlsx_bytes: bytes, sheet_names: list[str]) -> tuple[dict[str, list[tuple]], dict[str, list[tuple]]]:
     """
-    Parse xlsx bytes, return dict: {team_code: [(age, bid_type, event_qualified), ...]}
+    Parse xlsx bytes. Returns:
+      bid_map: {team_code: [(age, bid_type, event_qualified), ...]}
+      region_extras: {region: [(age, bid_type, event_qualified), ...]}
+        Captures BACK TO REGION rows — bids that trickled down to a region
+        because the original qualifier-winner already had a higher bid.
     """
     bid_map = {}
+    region_extras = {}
     try:
         wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
     except Exception as e:
         print(f"  WARNING: Could not parse xlsx: {e}")
-        return bid_map
+        return bid_map, region_extras
 
     for sheet_name in sheet_names:
         if sheet_name not in wb.sheetnames:
@@ -367,25 +372,20 @@ def parse_bid_xlsx(xlsx_bytes: bytes, sheet_names: list[str]) -> dict[str, list[
         for row in rows[3:]:  # Skip first 3 header rows
             if not row or len(row) < 4:
                 continue
-            # Column D (index 3) = team code
+            # Column D (index 3) = team code, E = region, F = event qualified
             code_val = row[3]
-            if code_val is None:
-                continue
-            code = str(code_val).strip()
-            if not TEAM_CODE_RE.match(code):
-                continue
-
-            # Column E (index 4) = region, Column F (index 5) = event qualified
             region = str(row[4]).strip() if len(row) > 4 and row[4] else ""
             event_q = str(row[5]).strip() if len(row) > 5 and row[5] else ""
 
-            entry = (age_str, bid_type, event_q)
-            if code not in bid_map:
-                bid_map[code] = []
-            bid_map[code].append(entry)
+            code = str(code_val).strip() if code_val is not None else ""
+            if TEAM_CODE_RE.match(code):
+                bid_map.setdefault(code, []).append((age_str, bid_type, event_q))
+            elif region and "BACK TO REGION" in event_q.upper():
+                # Trickle-down bid returning to a region's pool
+                region_extras.setdefault(region, []).append((age_str, bid_type, event_q))
 
     wb.close()
-    return bid_map
+    return bid_map, region_extras
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -451,9 +451,14 @@ def bid_badge_html(bids: list[tuple]) -> str:
     return " ".join(parts)
 
 
-def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, reno_map: dict = None) -> str:
+BID_TIER_ORDER = ["Open", "National", "USA", "Liberty", "American", "Freedom"]
+
+
+def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, reno_map: dict = None, nc_trickle_by_age: dict = None) -> str:
     if reno_map is None:
         reno_map = {}
+    if nc_trickle_by_age is None:
+        nc_trickle_by_age = {}
     groups = list(AGE_GROUPS.keys())
     tabs_html = []
     panels_html = []
@@ -517,15 +522,47 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
                 f'<span class="stat alloc-stat">Region Bids: {alloc_str}</span>'
             )
 
+        # Trickle-down bids returned to NorCal (BACK TO REGION entries)
+        trickle_list = nc_trickle_by_age.get(age, [])
+        trickle_alloc_html = ""
+        if trickle_list:
+            # Aggregate by bid type for compact summary
+            tcount = {}
+            for bt, _ev in trickle_list:
+                tcount[bt] = tcount.get(bt, 0) + 1
+            tier_index = {t: i for i, t in enumerate(BID_TIER_ORDER)}
+            summary = " / ".join(
+                f"{cnt} {bt}" for bt, cnt in sorted(tcount.items(), key=lambda kv: tier_index.get(kv[0], 99))
+            )
+            sources = ", ".join(f"{bt} from {ev}" for bt, ev in trickle_list)
+            trickle_alloc_html = (
+                f'<span class="sep">•</span>'
+                f'<span class="stat trickle-stat" title="{sources}">'
+                f'Trickle-Down: {summary}</span>'
+            )
+
         # ── Bid Projection ────────────────────────────────────────────
         # Parse bid allocation counts from string like "2 National / 2 American / 2 Freedom"
         bid_projection_html = ""
-        if alloc_str and teams:
+        if (alloc_str or trickle_list) and teams:
             bid_type_counts = []
-            for part in alloc_str.split("/"):
+            for part in alloc_str.split("/") if alloc_str else []:
                 m = re.match(r"\s*(\d+)\s+(\w+)", part.strip())
                 if m:
                     bid_type_counts.append((m.group(2), int(m.group(1))))
+
+            # Merge in trickle-down bids, then re-sort by tier (Open > National > USA > Liberty > American > Freedom)
+            if trickle_list:
+                merged = {}
+                for bt, cnt in bid_type_counts:
+                    merged[bt] = merged.get(bt, 0) + cnt
+                for bt, _ev in trickle_list:
+                    merged[bt] = merged.get(bt, 0) + 1
+                tier_index = {t: i for i, t in enumerate(BID_TIER_ORDER)}
+                bid_type_counts = sorted(
+                    merged.items(),
+                    key=lambda kv: tier_index.get(kv[0], 99),
+                )
 
             # Walk sorted teams, skip those with existing bids, assign region bids
             projected = []  # (bid_type, rank, team)
@@ -673,6 +710,7 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
             f'<span class="sep">•</span>'
             f'<span class="stat bid-stat">{bid_count} with bids</span>'
             + bid_alloc_html
+            + trickle_alloc_html
             + "</div>"
             + norcal_club_html
             + bid_positions
@@ -1024,6 +1062,7 @@ def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, r
     color: var(--muted);
   }}
   .summary .bid-stat {{ color: var(--green); background: var(--green-bg); }}
+  .summary .trickle-stat {{ color: #7e3af2; background: #f5f3ff; border: 1px solid #ddd6fe; cursor: help; }}
   .summary .sep {{ color: var(--border); }}
   .data-table {{
     width: 100%;
@@ -1270,6 +1309,7 @@ def fetch_and_generate():
     # ── Step 2: Fetch SharePoint bid data ────────────────────────────────────
     print("\n[2/3] Fetching USAV bid qualification data from SharePoint...")
     bid_map = {}
+    region_extras_all = {}  # region -> [(age, bid_type, event), ...]
     sharepoint_ok = False
 
     for file_cfg in SHAREPOINT_FILES:
@@ -1278,8 +1318,10 @@ def fetch_and_generate():
         sp_session.headers.update(session.headers)
         xlsx_bytes = download_sharepoint_xlsx(file_cfg, sp_session)
         if xlsx_bytes:
-            partial = parse_bid_xlsx(xlsx_bytes, file_cfg["sheets"])
+            partial, partial_extras = parse_bid_xlsx(xlsx_bytes, file_cfg["sheets"])
             bid_map.update(partial)
+            for region, entries in partial_extras.items():
+                region_extras_all.setdefault(region, []).extend(entries)
             sharepoint_ok = True
             print(f"  Parsed {len(partial)} bid-qualified teams from {file_cfg['label']}")
         else:
@@ -1288,6 +1330,16 @@ def fetch_and_generate():
     print(f"  Total bid-qualified teams (all regions): {len(bid_map)}")
     nc_bid_codes = {k for k in bid_map if k.endswith("NC")}
     print(f"  NorCal (NC) bid-qualified teams: {len(nc_bid_codes)}")
+
+    # NorCal trickle-down bids returned to the region — group by age
+    nc_trickle_by_age = {}  # age -> [(bid_type, event), ...]
+    for age, bid_type, event_q in region_extras_all.get("NC", []):
+        nc_trickle_by_age.setdefault(age, []).append((bid_type, event_q))
+    if nc_trickle_by_age:
+        print(f"  NorCal trickle-down bids: {sum(len(v) for v in nc_trickle_by_age.values())}")
+        for age in sorted(nc_trickle_by_age):
+            for bt, ev in nc_trickle_by_age[age]:
+                print(f"    {age}s +1 {bt} (from {ev})")
 
     # ── Step 2b: Merge manual bid entries ────────────────────────────────────
     for code, entries in MANUAL_BIDS.items():
@@ -1316,7 +1368,7 @@ def fetch_and_generate():
 
     # ── Generate HTML ─────────────────────────────────────────────────────────
     fetch_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
-    html = generate_html(all_teams, fetch_date, sharepoint_ok, reno_map)
+    html = generate_html(all_teams, fetch_date, sharepoint_ok, reno_map, nc_trickle_by_age)
 
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
